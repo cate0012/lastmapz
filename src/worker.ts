@@ -2,7 +2,10 @@ import type { Env, User } from './types.js';
 import { initDb } from './db.js';
 import { getSessionUser, deleteSession, getTokenFromCookies, clearSessionCookie } from './sessions.js';
 import { handleQrStart, handleQrPoll, handleAccorIdStart, handleAccorIdCallback, handleQrPollWithAccorIdLink } from './auth.js';
-import { handleListMaps, handleCreateMap, handleGetMap, handleUpdateMap, handleDeleteMap, handleShareMap, handleUnshareMap, handleSearchUsers, handleGetTiles, handleUpdateTiles, handleGetChanges } from './maps.js';
+import { handleListMaps, handleCreateMap, handleGetMap, handleUpdateMap, handleDeleteMap, handleShareMap, handleUnshareMap, handleSearchUsers, handleGetTiles, handleUpdateTiles, handleGetChanges, handleListTemplates, handleCreateTemplate, handleDeleteTemplate } from './maps.js';
+import { loginPage } from './pages/login.js';
+import { dashboardPage } from './pages/dashboard.js';
+import { editorPage } from './pages/editor.js';
 
 let dbReady = false;
 
@@ -11,6 +14,10 @@ async function ensureDb(env: Env) {
     await initDb(env);
     dbReady = true;
   }
+}
+
+function html(body: string, status = 200): Response {
+  return new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 function json(data: unknown, status = 200, headers?: Record<string, string>): Response {
@@ -32,15 +39,32 @@ export default {
     }
 
     try {
-      // HTML routes are not served in this revision (UI ships separately).
-      if (method === 'GET' && (path === '/' || path === '/login' || path === '/dashboard' || path.startsWith('/map/'))) {
-        return json({ error: 'Not found' }, 404);
+      // ─── Pages ───
+      if (method === 'GET' && (path === '/' || path === '/login')) {
+        if (user) return Response.redirect(`${env.APP_URL}/dashboard`, 302);
+        const error = url.searchParams.get('error') || undefined;
+        const accoridPending = url.searchParams.get('accorid_pending') || undefined;
+        return html(loginPage({ error, accoridPending }));
+      }
+
+      if (method === 'GET' && path === '/dashboard') {
+        if (!user) return Response.redirect(`${env.APP_URL}/login`, 302);
+        const linked = url.searchParams.get('linked') === '1';
+        return html(dashboardPage(user, { linked }));
+      }
+
+      if (method === 'GET' && path.startsWith('/map/')) {
+        if (!user) return Response.redirect(`${env.APP_URL}/login`, 302);
+        const mapId = path.slice(5);
+        if (!mapId) return Response.redirect(`${env.APP_URL}/dashboard`, 302);
+        return html(editorPage(user, mapId));
       }
 
       if (method === 'GET' && path === '/auth/accorid/callback') {
         return handleAccorIdCallback(env, req);
       }
 
+      // ─── Auth API ───
       if (method === 'POST' && path === '/api/auth/qr/start') {
         return handleQrStart(env);
       }
@@ -75,8 +99,10 @@ export default {
         });
       }
 
+      // ─── Require auth for all API routes below ───
       if (!user) return json({ error: 'Unauthorized' }, 401);
 
+      // ─── Maps API ───
       if (method === 'GET' && path === '/api/maps') {
         return handleListMaps(env, req, user);
       }
@@ -87,6 +113,17 @@ export default {
 
       if (method === 'GET' && path === '/api/users/search') {
         return handleSearchUsers(env, req);
+      }
+
+      // ─── Templates API ───
+      if (path === '/api/templates') {
+        if (method === 'GET') return handleListTemplates(env, req);
+        if (method === 'POST') return handleCreateTemplate(env, req);
+      }
+
+      const templateMatch = path.match(/^\/api\/templates\/([^/]+)$/);
+      if (templateMatch && method === 'DELETE') {
+        return handleDeleteTemplate(env, templateMatch[1], user);
       }
 
       const mapMatch = path.match(/^\/api\/maps\/([^/]+)$/);

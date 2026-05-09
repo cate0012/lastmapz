@@ -155,3 +155,28 @@ export async function handleGetChanges(env: Env, req: Request, mapId: string, us
 
   return Response.json({ version: map!.version, changes });
 }
+
+// ─── Templates ───
+
+export async function handleListTemplates(env: Env, user: User): Promise<Response> {
+  const templates = await db.listUserTemplates(env, user.id);
+  return Response.json({ templates });
+}
+
+export async function handleCreateTemplate(env: Env, req: Request, user: User): Promise<Response> {
+  const body = await req.json() as { name?: string; hexes?: Array<{ q: number; r: number }> };
+  if (!body.name || !body.hexes || !Array.isArray(body.hexes)) {
+    return Response.json({ error: 'Missing name or hexes' }, { status: 400 });
+  }
+  if (body.hexes.length === 0 || body.hexes.length > 100) {
+    return Response.json({ error: 'Template must have 1-100 hexes' }, { status: 400 });
+  }
+  const template = await db.createTemplate(env, user.id, body.name.slice(0, 50), body.hexes);
+  return Response.json({ template }, { status: 201 });
+}
+
+export async function handleDeleteTemplate(env: Env, templateId: string, user: User): Promise<Response> {
+  const deleted = await db.deleteTemplate(env, templateId, user.id);
+  if (!deleted) return Response.json({ error: 'Not found' }, { status: 404 });
+  return Response.json({ ok: true });
+}

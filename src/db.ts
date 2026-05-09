@@ -75,11 +75,21 @@ CREATE TABLE IF NOT EXISTS kv (
   expires_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS templates (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  hexes TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tiles_map ON tiles(map_id);
 CREATE INDEX IF NOT EXISTS idx_tile_changes_map_ver ON tile_changes(map_id, version);
 CREATE INDEX IF NOT EXISTS idx_map_shares_user ON map_shares(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_maps_owner ON maps(owner_id);
+CREATE INDEX IF NOT EXISTS idx_templates_user ON templates(user_id);
 `;
 
 // ─── DB helpers (D1-style prepare/bind API) ───
@@ -307,4 +317,46 @@ export async function getChangesSince(env: Env, mapId: string, sinceVersion: num
 export async function recordMapView(env: Env, mapId: string, userId: number): Promise<void> {
   await run(env, 'INSERT OR REPLACE INTO map_views (map_id, user_id, last_viewed_at) VALUES (?, ?, ?)',
     [mapId, userId, Date.now()]);
+}
+
+// ─── Templates ───
+
+export async function createTemplate(
+  env: Env, userId: number, name: string, hexes: Array<{ q: number; r: number }>
+): Promise<{ id: string; name: string; hexes: Array<{ q: number; r: number }>; created_at: number }> {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const hexesJson = JSON.stringify(hexes);
+  await run(env, 'INSERT INTO templates (id, user_id, name, hexes, created_at) VALUES (?, ?, ?, ?, ?)',
+    [id, userId, name, hexesJson, now]);
+  return { id, name, hexes, created_at: now };
+}
+
+export async function listUserTemplates(env: Env, userId: number): Promise<Array<{
+  id: string;
+  name: string;
+  hexes: Array<{ q: number; r: number }>;
+  created_at: number;
+}>> {
+  const rows = await query<{ id: string; name: string; hexes: string; created_at: number }>(
+    env, 'SELECT id, name, hexes, created_at FROM templates WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+  return rows.map(r => ({ ...r, hexes: JSON.parse(r.hexes) }));
+}
+
+export async function getTemplate(env: Env, templateId: string): Promise<{
+  id: string;
+  user_id: number;
+  name: string;
+  hexes: Array<{ q: number; r: number }>;
+  created_at: number;
+} | null> {
+  const row = await first<{ id: string; user_id: number; name: string; hexes: string; created_at: number }>(
+    env, 'SELECT * FROM templates WHERE id = ?', [templateId]);
+  if (!row) return null;
+  return { ...row, hexes: JSON.parse(row.hexes) };
+}
+
+export async function deleteTemplate(env: Env, templateId: string, userId: number): Promise<boolean> {
+  const result = await run(env, 'DELETE FROM templates WHERE id = ? AND user_id = ?', [templateId, userId]);
+  return result.meta.changes > 0;
 }

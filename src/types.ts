@@ -70,6 +70,14 @@ export interface MapShare {
   created_at: number;
 }
 
+export interface Template {
+  id: string;
+  user_id: number;
+  name: string;
+  hexes: Array<{ q: number; r: number }>;
+  created_at: number;
+}
+
 export interface RequestContext {
   user: User | null;
   sessionToken: string | null;
